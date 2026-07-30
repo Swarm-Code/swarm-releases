@@ -1,0 +1,60 @@
+SWARMCODE BINARY DISTRIBUTION LICENSE
+Version 1.0 — July 30, 2026
+
+Copyright (c) 2026 SwarmCode. All rights reserved.
+
+1. Limited license
+
+Subject to these terms, SwarmCode grants you a limited, non-exclusive,
+non-transferable, revocable license to download, install, and run unmodified
+official SwarmOS binary releases obtained from this repository for your
+internal personal or business use.
+
+2. Restrictions
+
+Except where applicable law expressly permits otherwise, you may not copy for
+redistribution, sell, sublicense, rent, lease, modify, create derivative works
+of, reverse engineer, decompile, or disassemble the binaries. You may make a
+reasonable number of backup copies solely for your own licensed use.
+
+3. Ownership
+
+SwarmCode and its licensors retain all right, title, and interest in SwarmOS,
+including all intellectual-property rights. No source-code license, trademark
+license, or right to use SwarmCode branding is granted.
+
+4. Third-party software
+
+The binaries may contain third-party software governed by separate license
+terms. Those terms and required notices apply to the corresponding components
+and are not restricted by this license.
+
+5. Updates
+
+Updates may add, change, or remove functionality. A release may include
+additional terms identified in its release notes; if those additional terms
+conflict with this license, the additional terms control for that release.
+
+6. Termination
+
+This license terminates automatically if you violate its terms. Upon
+termination, you must stop using and delete all copies of the binaries, except
+to the extent retention is required by law.
+
+7. Disclaimer
+
+THE BINARIES ARE PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR
+A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+8. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, SWARMCODE AND ITS SUPPLIERS WILL NOT BE
+LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR
+PUNITIVE DAMAGES, OR FOR LOSS OF DATA, PROFITS, REVENUE, OR BUSINESS, ARISING
+FROM OR RELATED TO THE BINARIES OR THIS LICENSE.
+
+9. Commercial and alternative terms
+
+For enterprise, redistribution, OEM, source, or other licensing terms, contact
+licensing@swarmcode.ai.
