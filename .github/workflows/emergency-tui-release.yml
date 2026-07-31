@@ -40,7 +40,7 @@ jobs:
           ref: ${{ inputs.source_tag }}
           fetch-depth: 0
           token: ${{ secrets.MONO_RELEASE_SOURCE_TOKEN }}
-          persist-credentials: false
+          persist-credentials: true
       - name: Validate immutable source metadata
         id: release
         env:
