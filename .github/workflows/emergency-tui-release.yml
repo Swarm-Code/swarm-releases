@@ -210,7 +210,11 @@ jobs:
           upload-release-assets: false
       - name: Generate and verify offline release attestations
         env:
+          ATTEST_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          ATTEST_SOURCE_REF: refs/tags/${{ inputs.source_tag }}
+          ATTEST_SOURCE_REPOSITORY: Swarm-Code/mono
           SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -224,7 +228,13 @@ jobs:
             dist/swarmos-linux-amd64 \
             --bundle dist/provenance-attestation.jsonl \
             --repo Swarm-Code/swarm-releases \
-            --signer-workflow Swarm-Code/swarm-releases/.github/workflows/emergency-tui-release.yml
+            --signer-workflow Swarm-Code/swarm-releases/.github/workflows/emergency-tui-release.yml \
+            --format json >verified-provenance.json
+          source_uri="git+https://github.com/Swarm-Code/mono@refs/tags/$SOURCE_TAG"
+          jq -e --arg commit "$SOURCE_COMMIT" --arg uri "$source_uri" '
+            .[0].verificationResult.statement.predicate.buildDefinition.resolvedDependencies
+              == [{"digest":{"gitCommit":$commit},"uri":$uri}]
+          ' verified-provenance.json >/dev/null
           env -u GH_TOKEN -u GITHUB_TOKEN gh attestation verify \
             dist/swarmos-linux-amd64 \
             --bundle dist/sbom-attestation.jsonl \
