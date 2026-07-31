@@ -1,0 +1,256 @@
+name: Emergency TUI Release
+
+run-name: Emergency TUI release ${{ inputs.public_tag }} from ${{ inputs.source_commit }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Annotated tag in Swarm-Code/mono
+        required: true
+        type: string
+      source_commit:
+        description: Exact tagged Swarm-Code/mono commit
+        required: true
+        type: string
+      public_tag:
+        description: Public release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emergency-tui-release-${{ inputs.public_tag }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      git_commit: ${{ steps.release.outputs.git_commit }}
+      build_time: ${{ steps.release.outputs.build_time }}
+      build_num: ${{ steps.release.outputs.build_num }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Swarm-Code/mono
+          ref: ${{ inputs.source_tag }}
+          fetch-depth: 0
+          token: ${{ secrets.MONO_RELEASE_SOURCE_TOKEN }}
+          persist-credentials: false
+      - name: Validate immutable source metadata
+        id: release
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          PUBLIC_TAG: ${{ inputs.public_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          validation_ref=refs/release-validation/tui
+          git fetch --no-tags origin \
+            "refs/tags/$SOURCE_TAG:$validation_ref"
+          TUI_TAG_OBJECT_REF="$validation_ref" \
+            TUI_EXPECTED_TAG_COMMIT="$SOURCE_COMMIT" \
+            ci/release/tui.sh validate-tag "$SOURCE_TAG"
+          ci/release/tui_test.sh
+          version=$(ci/release/tui.sh version)
+          test "$version" = "$PUBLIC_TAG"
+          {
+            echo "version=$version"
+            echo "git_commit=$(git rev-parse HEAD)"
+            echo "build_time=$(git show -s --format=%cI HEAD)"
+            echo "build_num=$(git rev-list --count HEAD)"
+          } >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            asset: swarmos-linux-amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            asset: swarmos-linux-arm64
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            asset: swarmos-darwin-amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+            asset: swarmos-darwin-arm64
+          - runner: windows-2025
+            goos: windows
+            goarch: amd64
+            asset: swarmos-windows-amd64.exe
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: '1'
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      ASSET_NAME: ${{ matrix.asset }}
+      VERSION: ${{ needs.metadata.outputs.version }}
+      GIT_COMMIT: ${{ needs.metadata.outputs.git_commit }}
+      BUILD_TIME: ${{ needs.metadata.outputs.build_time }}
+      BUILD_NUM: ${{ needs.metadata.outputs.build_num }}
+      VERSION_PKG: github.com/Swarm-Code/mono/swarm-sdk/swarm-tui/internal/version
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Swarm-Code/mono
+          ref: ${{ inputs.source_tag }}
+          token: ${{ secrets.MONO_RELEASE_SOURCE_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: swarm-sdk/go.sum
+      - name: Install Linux build prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc libx11-dev
+      - name: Configure Windows C compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build and verify release executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GIT_COMMIT"
+          mkdir -p dist
+          build_id="${GIT_COMMIT::12}-${BUILD_NUM}"
+          ldflags="-s -w -X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.GitCommit=${GIT_COMMIT} -X ${VERSION_PKG}.BuildTime=${BUILD_TIME} -X ${VERSION_PKG}.BuildID=${build_id} -X ${VERSION_PKG}.BuildNum=${BUILD_NUM}"
+          go -C swarm-sdk build -trimpath -tags fts5 -ldflags "$ldflags" \
+            -o "$GITHUB_WORKSPACE/dist/$ASSET_NAME" ./swarm-tui/cmd/swarmos
+          output=$("$GITHUB_WORKSPACE/dist/$ASSET_NAME" --version)
+          grep -F "SwarmOS ${VERSION}" <<<"$output"
+          grep -F "Commit: ${GIT_COMMIT}" <<<"$output"
+          (cd dist && sha256sum "$ASSET_NAME" >"$ASSET_NAME.sha256")
+      - name: Upload release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tui-release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Swarm-Code/mono
+          ref: ${{ inputs.source_tag }}
+          token: ${{ secrets.MONO_RELEASE_SOURCE_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: swarm-sdk/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: ci/release/attest/package-lock.json
+      - name: Install pinned attestation signer
+        run: npm ci --ignore-scripts --prefix ci/release/attest
+      - name: Download release candidates
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: tui-release-*
+          path: dist
+          merge-multiple: true
+      - name: Verify complete immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            swarmos-linux-amd64
+            swarmos-linux-arm64
+            swarmos-darwin-amd64
+            swarmos-darwin-arm64
+            swarmos-windows-amd64.exe
+          )
+          : >dist/checksums.txt
+          for asset in "${expected[@]}"; do
+            test -f "dist/$asset"
+            test -f "dist/$asset.sha256"
+            (cd dist && sha256sum -c "$asset.sha256")
+            cat "dist/$asset.sha256" >>dist/checksums.txt
+          done
+          go version -m dist/swarmos-linux-amd64 >dist/dependencies.txt
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 12
+      - name: Generate SPDX release SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          syft-version: v1.50.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate and verify offline release attestations
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          node ci/release/attest/index.mjs provenance \
+            dist/checksums.txt dist/provenance-attestation.jsonl
+          node ci/release/attest/index.mjs sbom \
+            dist/checksums.txt dist/sbom.spdx.json dist/sbom-attestation.jsonl
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 15
+          env -u GH_TOKEN -u GITHUB_TOKEN gh attestation verify \
+            dist/swarmos-linux-amd64 \
+            --bundle dist/provenance-attestation.jsonl \
+            --repo Swarm-Code/swarm-releases \
+            --signer-workflow Swarm-Code/swarm-releases/.github/workflows/emergency-tui-release.yml
+          env -u GH_TOKEN -u GITHUB_TOKEN gh attestation verify \
+            dist/swarmos-linux-amd64 \
+            --bundle dist/sbom-attestation.jsonl \
+            --repo Swarm-Code/swarm-releases \
+            --signer-workflow Swarm-Code/swarm-releases/.github/workflows/emergency-tui-release.yml \
+            --predicate-type https://spdx.dev/Document/v2.3
+      - name: Publish stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLIC_TAG: ${{ inputs.public_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$PUBLIC_TAG" --repo Swarm-Code/swarm-releases >/dev/null 2>&1; then
+            echo "error: immutable release $PUBLIC_TAG already exists" >&2
+            exit 1
+          fi
+          if gh api "repos/Swarm-Code/swarm-releases/git/ref/tags/$PUBLIC_TAG" >/dev/null 2>&1; then
+            echo "error: immutable public tag $PUBLIC_TAG already exists" >&2
+            exit 1
+          fi
+          notes="swarm-sdk/swarm-tui/docs/releases/${PUBLIC_TAG}.md"
+          test -f "$notes"
+          gh release create "$PUBLIC_TAG" dist/* \
+            --repo Swarm-Code/swarm-releases \
+            --target main \
+            --title "SwarmOS TUI $PUBLIC_TAG" \
+            --notes-file "$notes" \
+            --latest
